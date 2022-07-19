@@ -1,0 +1,305 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="MAIN" Id="{f90d3abf-c7dc-4019-b1ac-12abb9c33d2d}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR_INPUT
+	// Analogue inputs from dSPACE
+	AI_df1 AT %I* : INT;				//frequency area 1
+	AI_df2 AT %I* : INT;				//frequency area 2
+	AI_dPtie1 AT %I* : INT;				//tie-line power flow
+	// From other Beckhoff
+	GH_Stage AT %I* : INT;				//stage of g and h
+	u_g AT %I* : ARRAY [0..1] OF REAL;	//watermarked control inputs
+END_VAR
+VAR_OUTPUT
+	// To other Beckhoff
+	WQ_Stage AT %Q* : INT;					//stage of w and q
+	y_w AT %Q* : ARRAY [0..2] OF REAL;		//watermarked measurements
+	WatermarkerOn AT %Q* : BOOL := FALSE;	//Watermark Switch
+	//Analogue outputs to dSPACE
+	AO_dPc1 AT %Q* : INT;					//setpoint area 1
+	AO_dPc2 AT %Q* : INT;					//setpoint area 1
+END_VAR
+VAR
+	// Separate paramreters
+	y_p: ARRAY [0..2] OF REAL;	//array of measurements
+	u_h : ARRAY [0..1] OF REAL;	//control inputs after removal
+	Counter_WQ : DINT;			//counter WQ	
+	// Attack parameters
+	TriggerCA AT %Q* : UINT;
+	MeasurementCA : BOOL := TRUE;
+	ControlInputCA AT %Q* : BOOL := TRUE;
+	GammaGain : REAL := 1.299;
+	TimerReplay : UINT;
+	RecordTime : UINT := 5000;
+	ReplayRotation : UINT;
+	y_wa : ARRAY [0..2] OF REAL;
+	y_wr1 : ARRAY [0..4999] OF REAL;
+	y_wr2 : ARRAY [0..4999] OF REAL;
+	y_wr3 : ARRAY [0..4999] OF REAL;
+	// Recording parameters
+	Record_Scaling_noWM : BOOL := FALSE;
+	Record_Scaling_WM : BOOL := FALSE;
+	Record_Replay_noWM : BOOL := FALSE;
+	Record_Replay_WM : BOOL := FALSE;
+	Record_Counter : UINT := 0;
+	AGC_On AT %Q* : BOOL := FALSE;
+END_VAR
+VAR
+	// Load function blocks
+	fbwatermarker : FB_Watermarker;	//watermarker fb
+	fbremover : FB_Remover;			//remover fb
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Put measurements in array
+y_p[0] := INT_TO_REAL(AI_df1); 
+y_p[1] := INT_TO_REAL(AI_df2); 
+y_p[2] := INT_TO_REAL(AI_dPtie1);
+
+// Increase counters WM and change stage
+CASE Counter_WQ OF 				//select new stage
+	0:
+		WQ_Stage := 1;
+	2000:
+		WQ_Stage := 2;
+	4000:
+		WQ_Stage := 3;
+	6000:
+		WQ_Stage := 4;
+	8000:
+	// Switch back to stage 1
+	WQ_Stage := 1;
+	// Reset Counter to zero
+	Counter_WQ := -1;
+END_CASE
+
+// Recording simulation scaling attack no WM
+IF Record_Scaling_noWM THEN
+	Record_Counter := Record_Counter + 1;	//recording counter
+	WatermarkerOn := FALSE;					//turn off WM
+	AGC_On := TRUE;							//turn on AGC
+	CASE Record_Counter OF
+		30000:	// Start attack
+				TriggerCA := 2;
+		54000:	// Stop attack and simulation
+				TriggerCA := 0;
+				Record_Scaling_noWM := FALSE;
+				Record_Counter := 0;
+				Counter_WQ := 0;
+				AGC_On := FALSE;
+	END_CASE
+END_IF
+// Recording simulation scaling attack with WM
+IF Record_Scaling_WM THEN
+	Record_Counter := Record_Counter + 1;	//recording counter
+	Counter_WQ := Counter_WQ + 1;			//W and Q counter
+	WatermarkerOn := TRUE;					//turn on WM
+	AGC_On := TRUE;							//turn on AGC
+	CASE Record_Counter OF
+		30000:	// Start attack
+				TriggerCA := 2;
+		54000:	// Stop attack and simulation
+				TriggerCA := 0;
+				Record_Scaling_WM := FALSE;
+				Record_Counter := 0;
+				Counter_WQ := 0;
+				AGC_On := FALSE;
+	END_CASE
+END_IF
+// Recording simulation replay attack no WM
+IF Record_Replay_noWM THEN
+	Record_Counter := Record_Counter + 1;	//recording counter
+	WatermarkerOn := FALSE;					//turn off WM
+	AGC_On := TRUE;							//turn on AGC
+	CASE Record_Counter OF
+		25000:	// Start attack
+				TriggerCA := 3;
+		54000:	// Stop attack and simulation
+				TriggerCA := 0;
+				Record_Replay_noWM := FALSE;
+				Record_Counter := 0;
+				Counter_WQ := 0;
+				AGC_On := FALSE;
+	END_CASE
+END_IF
+// Recording simulation replay attack with WM
+IF Record_Replay_WM THEN
+	Record_Counter := Record_Counter + 1;	//recording counter
+	Counter_WQ := Counter_WQ + 1;			//W and Q counter
+	WatermarkerOn := TRUE;					//turn on WM
+	AGC_On := TRUE;							//turn on AGC
+	CASE Record_Counter OF
+		25000:	// Start attack
+				TriggerCA := 3;
+		54000:	// Stop attack and simulation
+				TriggerCA := 0;
+				Record_Replay_WM := FALSE;
+				Record_Counter := 0;
+				Counter_WQ := 0;
+				AGC_On := FALSE;
+	END_CASE
+END_IF
+
+(* Watermarking W *)
+IF WatermarkerOn THEN
+	fbwatermarker.Wstage := WQ_Stage;	//watermark state
+	fbwatermarker.wi := y_p;			//watermark input
+	fbwatermarker();					//call fb
+	y_wa := fbwatermarker.wo;			//read output
+ELSE
+	y_wa := y_p;
+END_IF
+
+(* Modelled Cyber-Attack on Measurements*)
+CASE TriggerCA OF
+	0:	// Reset attack variables
+		TimerReplay := 0;		//reset replay timer
+		ReplayRotation := 0;	//reset replay rotation
+		TriggerCA := 1;
+	1: 	// No attack
+		y_w[0] := y_wa[0];		//same df1
+		y_w[1] := y_wa[1];		//same df2
+		y_w[2] := y_wa[2];		//same dptie
+	2:	// Scaling attack
+		IF MeasurementCA THEN
+			y_w[0] := GammaGain*y_wa[0];
+			y_w[1] := GammaGain*y_wa[1];
+			y_w[2] := GammaGain*y_wa[2];
+		ELSE
+			y_w[0] := y_wa[0];		//same df1
+			y_w[1] := y_wa[1];		//same df2
+			y_w[2] := y_wa[2];		//same dptie			
+		END_IF
+	3:	// Replay attack recording phase
+		// Store data in array only during recording period
+		IF MeasurementCA THEN
+			IF TimerReplay < RecordTime THEN
+			y_wr1[TimerReplay] := y_wa[0];		//store f1 in array
+			y_wr2[TimerReplay] := y_wa[1];		//store f2 in array
+			y_wr3[TimerReplay] := y_wa[2];		//store dptie in array
+			END_IF
+			// Replay data from array		
+			y_w[0] := y_wr1[TimerReplay-RecordTime*ReplayRotation];
+			y_w[1] := y_wr2[TimerReplay-RecordTime*ReplayRotation];
+			y_w[2] := y_wr3[TimerReplay-RecordTime*ReplayRotation];
+			// Replay timer
+			TimerReplay := TimerReplay + 1;		//increment replay timer
+			// At end of recording period, advance to injection 
+			IF TimerReplay >= RecordTime*(ReplayRotation+1) THEN
+				ReplayRotation := ReplayRotation + 1;
+			END_IF
+		ELSE
+			y_w[0] := y_wa[0];		//same df1
+			y_w[1] := y_wa[1];		//same df2
+			y_w[2] := y_wa[2];		//same dptie			
+		END_IF
+END_CASE
+
+(* Communication from BECKHOFF-2 to BECKHOFF-1: df1_w, df2_w, dPtie1_w and Counter_WQ*)
+(* Q, AGC and G magic on Beckhoff 1 *)
+(* Communication from BECKHOFF-1 to BECKHOFF-2: dPc1_g, dPc1_g and Counter_GH*)
+
+(* Watermark remover H *)
+IF WatermarkerOn THEN
+	fbremover.Wstage := GH_Stage;	//remover state
+	fbremover.wi := u_g;			//remover input
+	fbremover();					//call fb
+	u_h := fbremover.wo;			//read output
+ELSE
+	u_h := u_g;
+END_IF
+
+// Rewrite to integer values
+AO_dPc1 := REAL_TO_INT(u_h[0]);
+AO_dPc2 := REAL_TO_INT(u_h[1]);]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="1103" Count="0" />
+      <LineId Id="1101" Count="0" />
+      <LineId Id="1287" Count="1" />
+      <LineId Id="1102" Count="0" />
+      <LineId Id="1132" Count="16" />
+      <LineId Id="1099" Count="0" />
+      <LineId Id="1107" Count="0" />
+      <LineId Id="1111" Count="0" />
+      <LineId Id="1108" Count="0" />
+      <LineId Id="1279" Count="0" />
+      <LineId Id="1164" Count="1" />
+      <LineId Id="1167" Count="5" />
+      <LineId Id="1286" Count="0" />
+      <LineId Id="1166" Count="0" />
+      <LineId Id="1109" Count="0" />
+      <LineId Id="1175" Count="4" />
+      <LineId Id="1280" Count="0" />
+      <LineId Id="1180" Count="7" />
+      <LineId Id="1285" Count="0" />
+      <LineId Id="1188" Count="0" />
+      <LineId Id="1174" Count="0" />
+      <LineId Id="1191" Count="2" />
+      <LineId Id="1195" Count="0" />
+      <LineId Id="1281" Count="0" />
+      <LineId Id="1196" Count="7" />
+      <LineId Id="1284" Count="0" />
+      <LineId Id="1204" Count="0" />
+      <LineId Id="1190" Count="0" />
+      <LineId Id="1207" Count="4" />
+      <LineId Id="1282" Count="0" />
+      <LineId Id="1212" Count="7" />
+      <LineId Id="1283" Count="0" />
+      <LineId Id="1220" Count="0" />
+      <LineId Id="1205" Count="0" />
+      <LineId Id="310" Count="0" />
+      <LineId Id="293" Count="0" />
+      <LineId Id="959" Count="0" />
+      <LineId Id="1009" Count="2" />
+      <LineId Id="960" Count="0" />
+      <LineId Id="1008" Count="0" />
+      <LineId Id="1007" Count="0" />
+      <LineId Id="952" Count="0" />
+      <LineId Id="512" Count="1" />
+      <LineId Id="517" Count="0" />
+      <LineId Id="808" Count="0" />
+      <LineId Id="852" Count="0" />
+      <LineId Id="864" Count="0" />
+      <LineId Id="855" Count="0" />
+      <LineId Id="854" Count="0" />
+      <LineId Id="519" Count="0" />
+      <LineId Id="634" Count="0" />
+      <LineId Id="633" Count="0" />
+      <LineId Id="522" Count="0" />
+      <LineId Id="1227" Count="0" />
+      <LineId Id="527" Count="1" />
+      <LineId Id="526" Count="0" />
+      <LineId Id="1297" Count="3" />
+      <LineId Id="1230" Count="0" />
+      <LineId Id="809" Count="0" />
+      <LineId Id="859" Count="0" />
+      <LineId Id="1228" Count="0" />
+      <LineId Id="921" Count="0" />
+      <LineId Id="857" Count="1" />
+      <LineId Id="856" Count="0" />
+      <LineId Id="922" Count="4" />
+      <LineId Id="935" Count="1" />
+      <LineId Id="928" Count="0" />
+      <LineId Id="815" Count="2" />
+      <LineId Id="1291" Count="0" />
+      <LineId Id="1293" Count="2" />
+      <LineId Id="1229" Count="0" />
+      <LineId Id="515" Count="0" />
+      <LineId Id="281" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="62" Count="0" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="846" Count="1" />
+      <LineId Id="941" Count="0" />
+      <LineId Id="1004" Count="2" />
+      <LineId Id="943" Count="0" />
+      <LineId Id="1002" Count="1" />
+      <LineId Id="949" Count="0" />
+      <LineId Id="339" Count="0" />
+      <LineId Id="336" Count="0" />
+      <LineId Id="143" Count="0" />
+      <LineId Id="389" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

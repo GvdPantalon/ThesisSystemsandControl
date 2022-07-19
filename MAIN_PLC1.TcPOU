@@ -1,0 +1,194 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="MAIN" Id="{16a37dcd-0335-4696-b8a2-396a4871b84e}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR_INPUT
+	// From other Beckhoff
+	WQ_Stage AT %I* : INT;				//stage of w and q
+	y_w AT %I* : ARRAY [0..2] OF REAL;	//watermarked measurements
+	WatermarkerOn AT %I* : BOOL;		//watermark Switch
+	TriggerCA AT %I* : UINT;			//attack stage
+	ControlInputCA AT %I* : BOOL;		//attack in Control Input
+	AGC_On AT %I* : BOOL;				//status of AGC
+END_VAR
+VAR_OUTPUT
+	// To other Beckhoff
+	GH_Stage AT %Q* : INT;				//counter for g and h
+	u_g AT %Q* : ARRAY [0..1] OF REAL;	//watermarked control inputs
+END_VAR
+VAR
+	// Seperate parameters
+	y_q : ARRAY [0..2] OF REAL;		//measurements after removal 
+	u_c : ARRAY [0..1] OF REAL;		//control input from agc
+	Counter_AGC : DINT := 0;		//agc counter
+	y_r1 : ARRAY [0..1] OF REAL;	//residual of area 1
+	y_hat1 : ARRAY [0..1] OF REAL;	//output estimate area 1
+	y_r2 : ARRAY [0..1] OF REAL;	//residual of area 2
+	y_hat2 : ARRAY [0..1] OF REAL;	//output estimate area 2
+	i: DINT;						//integer for for-loops
+	// Attack parameters
+	GammaGain : REAL := 1.3;
+	TimerReplay : UINT;
+	RecordTime : UINT := 5000;
+	ReplayRotation : UINT;
+	u_ga : ARRAY [0..1] OF REAL;
+	u_gr1 : ARRAY [0..4999] OF REAL;
+	u_gr2 : ARRAY [0..4999] OF REAL;
+END_VAR	
+VAR
+	// Load function blocks
+	fbwatermarker : FB_Watermarker;	//watermarker fb
+	fbremover : FB_Remover;			//remover fb
+	fbagc : FB_AGC;					//agc mechanism
+	fbobserver1 : FB_Observer1;		//observer 1
+	fbobserver2 : FB_Observer2;		//observer 2
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* Watermark remover Q *)
+IF WatermarkerOn THEN
+	fbremover.Wstage := WQ_Stage;	//remover state
+	fbremover.y_i := y_w;			//remover input
+	fbremover();					//call fb
+	y_q := fbremover.y_o;			//read output
+ELSE
+	y_q := y_w;
+END_IF
+
+(* Automatic Generation Control *)
+IF AGC_On THEN
+	CASE Counter_AGC OF				//execute agc every 2s
+	0:
+		u_c[0] := 0;
+		u_c[1] := 0;
+	1:
+		fbagc.y_q := y_q;		//measurement input
+		fbagc();				//call fb
+		u_c := fbagc.u_c;		//read control output
+	202:
+		Counter_AGC := 0;		//counter reset
+	END_CASE
+	Counter_AGC := Counter_AGC + 1;	//increment counter
+ELSE
+	u_c[0] := 0;
+	u_c[1] := 0;
+	Counter_AGC := 0;
+END_IF
+
+(* Detection of area 1 by Luenberger Observer *)
+fbobserver1.y_q[0] := y_q[0];	//df1_q as measurement
+fbobserver1.y_q[1] := y_q[2];	//dPtie1_q as measurement
+fbobserver1.u_c[0] := u_c[0];	//dPc1_c as control input
+fbobserver1.u_c[1] := 0;		//0 as measurement for load
+fbobserver1();					//call fb
+y_r1 := fbobserver1.res;		//residual area 1
+y_hat1 := fbobserver1.yhat;		//output estimate area 1
+
+(* Detection of area 2 by Luenberger Observer *)
+fbobserver2.y_q[0] := y_q[1];		//df1_q as measurement
+fbobserver2.y_q[1] := y_q[2]*-1;	//dPtie1_q as measurement
+fbobserver2.u_c[0] := u_c[1];		//dPc1_c as control input
+fbobserver2.u_c[1] := 0;			//0 as measurement for load
+fbobserver2();						//call fb
+y_r2 := fbobserver2.res;			//residual area 2
+y_hat2 := fbobserver2.yhat;			//output estimate area 2
+
+(* Watermarking G *)
+IF WatermarkerOn THEN
+	GH_Stage := WQ_Stage;				//align time steps
+	fbwatermarker.Wstage := GH_Stage;	//watermark state
+	fbwatermarker.wi := u_c;			//watermark input
+	fbwatermarker();					//call fb
+	u_ga := fbwatermarker.wo;			//read output
+ELSE
+	u_ga := u_c;
+END_IF
+
+(* Modelled Cyber-Attack on Control Inputs*)
+CASE TriggerCA OF
+	0:	// Reset attack variables
+		TimerReplay := 0;		//reset replay timer
+		ReplayRotation := 0;	//reset replay rotation
+		TriggerCA := 1;
+	1: 	// No attack
+		u_g[0] := u_ga[0];		//same df1
+		u_g[1] := u_ga[1];		//same df2
+	2:	// Scaling attack
+		IF ControlInputCA THEN
+			u_g[0] := GammaGain*u_ga[0];
+			u_g[1] := GammaGain*u_ga[1];
+		ELSE
+			u_g[0] := u_ga[0];		//same df1
+			u_g[1] := u_ga[1];		//same df2
+		END_IF
+	3:	// Replay attack recording phase
+		// Store data in array only during recording period
+		IF ControlInputCA THEN
+			IF TimerReplay < RecordTime THEN
+			u_gr1[TimerReplay] := u_ga[0];		//store f1 in array
+			u_gr2[TimerReplay] := u_ga[1];		//store f2 in array
+			END_IF
+			// Replay data from array		
+			u_g[0] := u_gr1[TimerReplay-RecordTime*ReplayRotation];
+			u_g[1] := u_gr2[TimerReplay-RecordTime*ReplayRotation];
+			// Replay timer
+			TimerReplay := TimerReplay + 1;		//increment replay timer
+			// At end of recording period, advance to injection 
+			IF TimerReplay >= RecordTime*(ReplayRotation+1) THEN
+				ReplayRotation := ReplayRotation + 1;
+			END_IF
+		ELSE
+			u_g[0] := u_ga[0];		//same df1
+			u_g[1] := u_ga[1];		//same df2
+		END_IF
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="402" Count="0" />
+      <LineId Id="911" Count="0" />
+      <LineId Id="947" Count="2" />
+      <LineId Id="912" Count="0" />
+      <LineId Id="946" Count="0" />
+      <LineId Id="945" Count="0" />
+      <LineId Id="908" Count="0" />
+      <LineId Id="1206" Count="0" />
+      <LineId Id="1187" Count="1" />
+      <LineId Id="1193" Count="0" />
+      <LineId Id="1259" Count="2" />
+      <LineId Id="1194" Count="6" />
+      <LineId Id="1190" Count="0" />
+      <LineId Id="1201" Count="3" />
+      <LineId Id="1191" Count="0" />
+      <LineId Id="1205" Count="0" />
+      <LineId Id="150" Count="0" />
+      <LineId Id="774" Count="0" />
+      <LineId Id="782" Count="0" />
+      <LineId Id="780" Count="0" />
+      <LineId Id="783" Count="1" />
+      <LineId Id="266" Count="0" />
+      <LineId Id="798" Count="0" />
+      <LineId Id="795" Count="0" />
+      <LineId Id="305" Count="0" />
+      <LineId Id="841" Count="5" />
+      <LineId Id="839" Count="0" />
+      <LineId Id="496" Count="0" />
+      <LineId Id="498" Count="0" />
+      <LineId Id="915" Count="0" />
+      <LineId Id="952" Count="3" />
+      <LineId Id="916" Count="0" />
+      <LineId Id="951" Count="0" />
+      <LineId Id="950" Count="0" />
+      <LineId Id="913" Count="0" />
+      <LineId Id="1016" Count="0" />
+      <LineId Id="1065" Count="8" />
+      <LineId Id="1075" Count="3" />
+      <LineId Id="1207" Count="0" />
+      <LineId Id="1209" Count="1" />
+      <LineId Id="1080" Count="6" />
+      <LineId Id="1088" Count="3" />
+      <LineId Id="1093" Count="5" />
+      <LineId Id="1215" Count="2" />
+      <LineId Id="1099" Count="0" />
+      <LineId Id="1015" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

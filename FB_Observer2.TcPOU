@@ -1,0 +1,76 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_Observer2" Id="{0e8b5f06-0246-4482-a7a9-575a27625d62}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Observer2
+VAR_INPUT
+	y_q AT %I* : ARRAY [0..1] OF REAL;	//f measurement after removal
+	u_c AT %I* : ARRAY [0..1] OF REAL;	//control input from agc
+END_VAR
+VAR_OUTPUT
+	res AT %Q* : ARRAY [0..1] OF REAL;
+	yhat AT %Q* : ARRAY [0..1] OF REAL;
+END_VAR
+VAR
+	UnitDelay_DSTATE : ARRAY [0..3] OF REAL;
+	xhat : ARRAY [0..3] OF REAL;
+	Cdmatrix: ARRAY [0..7] OF REAL := [1.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0];
+	Admatrix: ARRAY [0..15] OF REAL := [0.99886131412538,-0.0043694299176401628,-0.52424336425550433,
+		0.019988661768076718,0.0012389362363433077,0.983469633069172,-0.00032770724382301213,1.2426148993784737E-5,
+		1.0240851369469134E-5,0.016255345777965991,0.96721428729120607,6.8563675210889264E-8,-0.0012492913605047947,
+		1.82836467229038E-6,0.00032953560849530253,0.99998750471450659];
+	Bdmatrix: ARRAY [0..7] OF REAL := [1.1427279201814883E-7,0.00027319278818969733,0.032783884344121682,
+		5.7282437076048289E-10,-0.0012492913605047947,1.82836467229038E-6,0.00032953560849530253,
+		-1.2495285493366386E-5];
+	Ldmatrix: ARRAY [0..7] OF REAL := [2.0495204862515752,361.67504500091309,993.35317231249542,
+		0.022412535413380636,0.001463552210064861,3.8049825776030657,10.268517653198742,1.9000122529483088];
+END_VAR
+VAR_TEMP
+	i: DINT;					//integer for for-loops
+	tmp: ARRAY [0..3] OF REAL;	//temporary variable
+	y_q_0: ARRAY [0..1] OF REAL;
+	yhat_0: REAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// State estimates
+xhat[0] := UnitDelay_DSTATE[0];
+xhat[1] := UnitDelay_DSTATE[1];
+xhat[2] := UnitDelay_DSTATE[2];
+xhat[3] := UnitDelay_DSTATE[3];
+
+// Measurement estimates
+FOR i := 0 TO 1 DO 
+	yhat_0 := (Cdmatrix[i + 6] * UnitDelay_DSTATE[3]) + ((Cdmatrix[i + 4] * UnitDelay_DSTATE[2]) + ((Cdmatrix[i + 2] * UnitDelay_DSTATE[1]) + (Cdmatrix[i] * UnitDelay_DSTATE[0])));
+	y_q_0[i] := y_q[i] - yhat_0;
+	yhat[i] := yhat_0;
+END_FOR;
+
+// Update state estimates
+FOR i := 0 TO 3 DO 
+	tmp[i] := ((((Admatrix[i + 4] * UnitDelay_DSTATE[1]) + (Admatrix[i] * UnitDelay_DSTATE[0])) + (Admatrix[i + 8] * UnitDelay_DSTATE[2])) + (Admatrix[i + 12] * UnitDelay_DSTATE[3])) + (((Bdmatrix[i + 4] * u_c[1]) + (Bdmatrix[i] * u_c[0])) + ((Ldmatrix[i + 4] * y_q_0[1]) + (Ldmatrix[i] * y_q_0[0])));
+END_FOR;
+
+// Update unit delay (integral)
+UnitDelay_DSTATE[0] := tmp[0];
+UnitDelay_DSTATE[1] := tmp[1];
+UnitDelay_DSTATE[2] := tmp[2];
+UnitDelay_DSTATE[3] := tmp[3];
+
+// Calculate frequency residual
+res[0] := y_q[0] - yhat[0];
+IF res[0] <= 0 THEN
+	res[0] := res[0] * -1;
+	
+// Calculate tie-line residual
+END_IF
+res[1] := y_q[1] - yhat[1];
+IF res[1] <= 0 THEN
+	res[1] := res[1] * -1;
+END_IF]]></ST>
+    </Implementation>
+    <LineIds Name="FB_Observer2">
+      <LineId Id="10" Count="26" />
+      <LineId Id="44" Count="6" />
+      <LineId Id="37" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

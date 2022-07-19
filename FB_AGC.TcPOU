@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_AGC" Id="{c9d51ae7-90a5-4ba8-95ba-97aa08253f19}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_AGC
+VAR_INPUT
+	y_q AT %I* : ARRAY [0..2] OF REAL;
+END_VAR
+VAR_OUTPUT
+	u_c AT %Q* : ARRAY [0..1] OF REAL;
+END_VAR
+VAR
+	DTI1 : REAL := 0;
+	DTI2 : REAL := 0;
+	beta1 : REAL := 20.6;
+	beta2 : REAL := 16.9;
+	K1 : REAL := 0.3;
+	K2 : REAL := 0.3;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Subsequent to Discrete Time Integration
+u_c[0] := (K1 * DTI1);
+u_c[1] := (K2 * DTI2);
+// Prior to Discrete Time Integration
+DTI1 := (0.0 - (beta1 * y_q[0]) - y_q[2]) + DTI1;
+DTI2 := (0.0 - (beta2 * y_q[1]) + y_q[2]) + DTI2;]]></ST>
+    </Implementation>
+    <LineIds Name="FB_AGC">
+      <LineId Id="20" Count="5" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

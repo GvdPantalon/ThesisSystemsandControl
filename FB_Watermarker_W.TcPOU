@@ -1,0 +1,118 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_Watermarker" Id="{b835b506-3147-45e3-b364-9054e3d690ca}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Watermarker
+VAR_INPUT
+	wi AT %I* : ARRAY [0..2] OF REAL;	//watermark input
+	Wstage AT %I* : INT;				//watermark state
+END_VAR
+VAR_OUTPUT
+	wo AT %Q* : ARRAY [0..2] OF REAL;	//watermark output
+END_VAR
+VAR
+	// Parameters Watermarkers W
+	StateDelay1: ARRAY [0..2] OF REAL;
+	StateDelay2: ARRAY [0..2] OF REAL;
+	StateDelay3: ARRAY [0..2] OF REAL;
+	// Create matrices
+	Ad: ARRAY [0..8] OF REAL;
+	Bd: ARRAY [0..2] OF REAL;
+	Cd: ARRAY [0..2] OF REAL;
+	Dd: REAL;
+	// Initialization matrixes
+	Ad_init: ARRAY [0..8] OF REAL := [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0];
+	Bd_init: ARRAY [0..2] OF REAL := [0.0,0.0,0.0];
+	Cd_init: ARRAY [0..2] OF REAL := [0.0,0.0,0.0];
+	Dd_init: REAL := 0.0;
+	// Matrix entries per state
+	Ad_1: ARRAY [0..8] OF REAL := [0.0,0.0,0.238460443654787,1.0,0.0,0.191531287211503,0.0,1.0,
+	0.440439525987710];
+	Ad_2: ARRAY [0..8] OF REAL := [0.0,0.0,-0.022302390118591,1.0,0.0,0.304756307162082,0.0,1.0,
+	0.172351704368799];
+	Ad_3: ARRAY [0..8] OF REAL := [0.0,0.0,0.212501053002601,1.0,0.0,0.116192931855412,0.0,1.0,
+	0.387430193070241];
+	Ad_4: ARRAY [0..8] OF REAL := [0.0,0.0,-0.073292098719115,1.0,0.0,0.272971577284040,0.0,1.0,
+	0.253443231004313];
+	Bd_a: ARRAY [0..2] OF REAL := [0.0,0.0,1.0];
+	Cd_1: ARRAY [0..2] OF REAL := [-0.023846044365479, -0.019153128721150, -0.044043952598771];
+	Cd_2: ARRAY [0..2] OF REAL := [0.002230239011859, -0.030475630716208, -0.017235170436880];
+	Cd_3: ARRAY [0..2] OF REAL := [-0.021250105300260, -0.011619293185541, -0.038743019307024];
+	Cd_4: ARRAY [0..2] OF REAL := [0.007329209871911, -0.027297157728404, -0.025344323100431];
+	Dd_a: REAL := -0.1;
+	// Integer for for-loops
+	i: DINT;	//states
+    // Temporary variables for watermarking df1, df2, dPtie1
+	tmp1: ARRAY [0..2] OF REAL;
+	tmp2: ARRAY [0..2] OF REAL;
+	tmp3: ARRAY [0..2] OF REAL;
+    y_fromCd: ARRAY [0..2] OF REAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CASE Wstage OF
+	1:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_1;
+		Cd := Cd_1;
+		Bd := Bd_a; Dd := Dd_a;
+	2:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_2;
+		Cd := Cd_2;
+		Bd := Bd_a; Dd := Dd_a;
+	3:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_3;
+		Cd := Cd_3;
+		Bd := Bd_a; Dd := Dd_a;
+	4:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_4;
+		Cd := Cd_4;
+		Bd := Bd_a; Dd := Dd_a;
+END_CASE
+
+// State delay times Cd matrix
+y_fromCd[0] := ((Cd[0] * StateDelay1[0]) + (Cd[1] * StateDelay1[1])) + (Cd[2] * StateDelay1[2]);
+y_fromCd[1] := ((Cd[0] * StateDelay2[0]) + (Cd[1] * StateDelay2[1])) + (Cd[2] * StateDelay2[2]);
+y_fromCd[2] := ((Cd[0] * StateDelay3[0]) + (Cd[1] * StateDelay3[1])) + (Cd[2] * StateDelay3[2]);
+
+// State derivative
+FOR i := 0 TO 2 DO 
+	tmp1[i] := (((Ad[i + 3] * StateDelay1[1]) + (Ad[i] * StateDelay1[0])) + (Ad[i + 6] * StateDelay1[2])) + (Bd[i] * wi[0]);
+	tmp2[i] := (((Ad[i + 3] * StateDelay2[1]) + (Ad[i] * StateDelay2[0])) + (Ad[i + 6] * StateDelay2[2])) + (Bd[i] * wi[1]);
+	tmp3[i] := (((Ad[i + 3] * StateDelay3[1]) + (Ad[i] * StateDelay3[0])) + (Ad[i + 6] * StateDelay3[2])) + (Bd[i] * wi[2]);
+END_FOR;
+
+// Update state delay
+StateDelay1[0] := tmp1[0]; StateDelay1[1] := tmp1[1]; StateDelay1[2] := tmp1[2];
+StateDelay2[0] := tmp2[0]; StateDelay2[1] := tmp2[1]; StateDelay2[2] := tmp2[2];
+StateDelay3[0] := tmp3[0]; StateDelay3[1] := tmp3[1]; StateDelay3[2] := tmp3[2];
+
+// Watermark output
+FOR i := 0 TO 2 DO
+	wo[i] := (Dd * wi[i]) + y_fromCd[i];
+END_FOR]]></ST>
+    </Implementation>
+    <LineIds Name="FB_Watermarker">
+      <LineId Id="117" Count="1" />
+      <LineId Id="221" Count="0" />
+      <LineId Id="119" Count="1" />
+      <LineId Id="214" Count="0" />
+      <LineId Id="121" Count="1" />
+      <LineId Id="222" Count="0" />
+      <LineId Id="123" Count="0" />
+      <LineId Id="218" Count="0" />
+      <LineId Id="124" Count="0" />
+      <LineId Id="223" Count="0" />
+      <LineId Id="125" Count="1" />
+      <LineId Id="219" Count="0" />
+      <LineId Id="127" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="128" Count="1" />
+      <LineId Id="220" Count="0" />
+      <LineId Id="130" Count="17" />
+      <LineId Id="77" Count="3" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

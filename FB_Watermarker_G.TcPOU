@@ -1,0 +1,97 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="FB_Watermarker" Id="{673a9721-46b7-4fd2-a7e4-e81587114c46}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Watermarker
+VAR_INPUT
+	wi AT %I* : ARRAY [0..1] OF REAL;	//watermark input
+	Wstage AT %I* : INT;				//watermark state
+END_VAR
+VAR_OUTPUT
+	wo AT %Q* : ARRAY [0..1] OF REAL;	//watermark output
+END_VAR
+VAR
+	// Parameters Watermarkers W
+	StateDelay1: ARRAY [0..2] OF REAL;
+	StateDelay2: ARRAY [0..2] OF REAL;
+	// Create matrices
+	Ad: ARRAY [0..8] OF REAL;
+	Bd: ARRAY [0..2] OF REAL;
+	Cd: ARRAY [0..2] OF REAL;
+	Dd: REAL;
+	// Initialization matrixes
+	Ad_init: ARRAY [0..8] OF REAL := [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0];
+	Bd_init: ARRAY [0..2] OF REAL := [0.0,0.0,0.0];
+	Cd_init: ARRAY [0..2] OF REAL := [0.0,0.0,0.0];
+	Dd_init: REAL := 0.0;
+	// Matrix entries per state
+	Ad_1: ARRAY [0..8] OF REAL := [0.0,0.0,-0.036905608893131,1.0,0.0,0.006816334520669,0.0,1.0,
+	0.262126484274421];
+	Ad_2: ARRAY [0..8] OF REAL := [0.0,0.0,-0.046043005167115,1.0,0.0,0.259017393780392,0.0,1.0,
+	0.192160255314797];
+	Ad_3: ARRAY [0..8] OF REAL := [0.0,0.0,0.172195843700837,1.0,0.0,0.083139427012219,0.0,1.0,
+	0.388497486431479];
+	Ad_4: ARRAY [0..8] OF REAL := [0.0,0.0,0.079880170320442,1.0,0.0,0.270607768227754,0.0,1.0,
+	0.404649690003684];
+	Bd_a: ARRAY [0..2] OF REAL := [0.0,0.0,1.0];
+	Cd_1: ARRAY [0..2] OF REAL := [0.003690560889313, -0.000681633452067, -0.026212648427442];
+	Cd_2: ARRAY [0..2] OF REAL := [0.004604300516711, -0.025901739378039, -0.019216025531480];
+	Cd_3: ARRAY [0..2] OF REAL := [-0.017219584370084, -0.008313942701222, -0.038849748643148];
+	Cd_4: ARRAY [0..2] OF REAL := [-0.007988017032044, -0.027060776822775, -0.040464969000368];
+	Dd_a: REAL := -0.1;
+	// Integer for for-loops
+	i: DINT;
+    // Temporary variables for watermarking df1, df2, dPtie1
+	tmp1: ARRAY [0..2] OF REAL;
+	tmp2: ARRAY [0..2] OF REAL;
+	y_fromCd: ARRAY [0..1] OF REAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CASE Wstage OF
+	1:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_1;
+		Cd := Cd_1;
+		Bd := Bd_a; Dd := Dd_a;
+	2:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_2;
+		Cd := Cd_2;
+		Bd := Bd_a; Dd := Dd_a;
+	3:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_3;
+		Cd := Cd_3;
+		Bd := Bd_a; Dd := Dd_a;
+	4:
+		Ad := Ad_init; Cd := Cd_init; Bd := Bd_init; Dd := Dd_init;
+		Ad := Ad_4;
+		Cd := Cd_4;
+		Bd := Bd_a; Dd := Dd_a;
+END_CASE
+
+// State delay times Cd matrix
+y_fromCd[0] := ((Cd[0] * StateDelay1[0]) + (Cd[1] * StateDelay1[1])) + (Cd[2] * StateDelay1[2]);
+y_fromCd[1] := ((Cd[0] * StateDelay2[0]) + (Cd[1] * StateDelay2[1])) + (Cd[2] * StateDelay2[2]);
+
+// State derivative
+FOR i := 0 TO 2 DO 
+	tmp1[i] := (((Ad[i + 3] * StateDelay1[1]) + (Ad[i] * StateDelay1[0])) + (Ad[i + 6] * StateDelay1[2])) + (Bd[i] * wi[0]);
+	tmp2[i] := (((Ad[i + 3] * StateDelay2[1]) + (Ad[i] * StateDelay2[0])) + (Ad[i + 6] * StateDelay2[2])) + (Bd[i] * wi[1]);
+END_FOR;
+
+// Update state delay
+StateDelay1[0] := tmp1[0]; StateDelay1[1] := tmp1[1]; StateDelay1[2] := tmp1[2];
+StateDelay2[0] := tmp2[0]; StateDelay2[1] := tmp2[1]; StateDelay2[2] := tmp2[2];
+
+// Watermark output
+FOR i := 0 TO 1 DO
+	wo[i] := (Dd * wi[i]) + y_fromCd[i];
+END_FOR]]></ST>
+    </Implementation>
+    <LineIds Name="FB_Watermarker">
+      <LineId Id="100" Count="20" />
+      <LineId Id="23" Count="18" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

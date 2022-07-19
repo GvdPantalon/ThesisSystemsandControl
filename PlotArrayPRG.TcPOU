@@ -1,0 +1,81 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.10">
+  <POU Name="PlotArrayPRG" Id="{05b097a6-1684-4e13-841e-229fb81aa977}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PlotArrayPRG
+VAR
+	// Indices
+	PlotIndex : DINT := 500;
+	diLoopInx : DINT;
+	// Measurements
+	aPlot_df1 : ARRAY[1..500] OF REAL;	
+	aPlot_df2 : ARRAY[1..500] OF REAL;
+	aPlot_dPtie1 : ARRAY[1..500] OF REAL;
+	// Control inputs
+	aPlot_dPc1 : ARRAY[1..500] OF REAL;	
+	aPlot_dPc2 : ARRAY[1..500] OF REAL;
+	// Estimated measurements
+	aPlot_yhat_df1 : ARRAY[1..500] OF REAL;
+	aPlot_yhat_df2 : ARRAY[1..500] OF REAL;
+	aPlot_yhat_dPtie1 : ARRAY[1..500] OF REAL;
+	// Detection residuals
+	aPlot_res_df1 : ARRAY[1..500] OF REAL;
+	aPlot_res_df2 : ARRAY[1..500] OF REAL;
+	aPlot_res_dPtie1 : ARRAY[1..500] OF REAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[(* Loop for plot *)
+FOR diLoopInx := 1 TO PlotIndex - 1 DO
+	// Measurement array
+	aPlot_df1[diLoopInx] := aPlot_df1[diLoopInx + 1];
+	aPlot_df2[diLoopInx] := aPlot_df2[diLoopInx + 1];
+	aPlot_dPtie1[diLoopInx] := aPlot_dPtie1[diLoopInx + 1];
+	// Control input array
+	aPlot_dPc1[diLoopInx] := aPlot_dPc1[diLoopInx + 1];
+	aPlot_dPc2[diLoopInx] := aPlot_dPc2[diLoopInx + 1];
+	// Estimated measurements array
+	aPlot_yhat_df1[diLoopInx] := aPlot_yhat_df1[diLoopInx + 1];
+	aPlot_yhat_df2[diLoopInx] := aPlot_yhat_df2[diLoopInx + 1];
+	aPlot_yhat_dPtie1[diLoopInx] := aPlot_yhat_dPtie1[diLoopInx + 1];
+	// Detection residuals array
+	aPlot_res_df1[diLoopInx] := aPlot_res_df1[diLoopInx + 1];
+	aPlot_res_df2[diLoopInx] := aPlot_res_df2[diLoopInx + 1];
+	aPlot_res_dPtie1[diLoopInx] := aPlot_res_dPtie1[diLoopInx + 1];
+END_FOR 
+
+(* Update final values *)
+// Measurement
+aPlot_df1[PlotIndex] := main.y_q[0];
+aPlot_df2[PlotIndex] := main.y_q[1];
+aPlot_dPtie1[PlotIndex] := main.y_q[2];
+// Control input
+aPlot_dPc1[PlotIndex] := main.u_c[0];
+aPlot_dPc2[PlotIndex] := main.u_c[1];
+// Estimated measurements
+aPlot_yhat_df1[PlotIndex] := main.y_hat1[0];
+aPlot_yhat_df2[PlotIndex] := main.y_hat2[0];
+aPlot_yhat_dPtie1[PlotIndex] := main.y_hat1[1];
+// Detection residuals
+aPlot_res_df1[PlotIndex] := main.y_r1[0];
+aPlot_res_df2[PlotIndex] := main.y_r2[0];
+aPlot_res_dPtie1[PlotIndex] := main.y_r1[1];]]></ST>
+    </Implementation>
+    <LineIds Name="PlotArrayPRG">
+      <LineId Id="17" Count="8" />
+      <LineId Id="50" Count="3" />
+      <LineId Id="26" Count="4" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="33" Count="2" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="36" Count="1" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="60" Count="1" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="38" Count="1" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
